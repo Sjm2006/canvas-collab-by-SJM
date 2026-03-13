@@ -1,44 +1,49 @@
-// socket.js — handles all socket.io client-side communication
+// socket.js — all socket.io client communication
 
 let socket;
-let myIdentity = null;
-const remoteCursors = new Map(); // userId -> cursor DOM element
+const remoteCursors = new Map();
 
 export function initSocket(roomId, callbacks) {
-  socket = io();
+  // Connect to the server that served this page
+  socket = io({ transports: ['websocket', 'polling'] });
 
   socket.on('connect', () => {
+    console.log('Socket connected:', socket.id);
     socket.emit('join-room', roomId);
   });
 
-  // Receive our identity (name + color)
+  socket.on('connect_error', (err) => {
+    console.error('Socket connection error:', err.message);
+  });
+
+  // Our identity assigned by server
   socket.on('user-identity', (identity) => {
-    myIdentity = identity;
     callbacks.onIdentity(identity);
   });
 
-  // Receive full board history on join
+  // Full board history on join
   socket.on('board-state', (strokes) => {
+    console.log('Received board state:', strokes.length, 'strokes');
     callbacks.onBoardState(strokes);
   });
 
-  // Receive a stroke from another user
+  // Incoming stroke from another user
   socket.on('draw', (stroke) => {
     callbacks.onRemoteDraw(stroke);
   });
 
-  // Receive cursor movement from another user
+  // Incoming cursor position
   socket.on('cursor-move', (data) => {
     updateRemoteCursor(data);
   });
 
-  // Board was cleared
+  // Board cleared by someone
   socket.on('clear-board', () => {
     callbacks.onClear();
     clearAllCursors();
   });
 
-  // Updated user list
+  // User list updated
   socket.on('users-update', (users) => {
     callbacks.onUsersUpdate(users);
   });
@@ -50,18 +55,18 @@ export function initSocket(roomId, callbacks) {
 }
 
 export function emitDraw(strokeData) {
-  if (socket) socket.emit('draw', strokeData);
+  if (socket && socket.connected) socket.emit('draw', strokeData);
 }
 
 export function emitCursorMove(x, y) {
-  if (socket) socket.emit('cursor-move', { x, y });
+  if (socket && socket.connected) socket.emit('cursor-move', { x, y });
 }
 
 export function emitClear() {
-  if (socket) socket.emit('clear-board');
+  if (socket && socket.connected) socket.emit('clear-board');
 }
 
-// --- Remote cursor rendering ---
+// --- Remote cursor DOM management ---
 function updateRemoteCursor(data) {
   let cursorEl = remoteCursors.get(data.userId);
 
@@ -72,7 +77,8 @@ function updateRemoteCursor(data) {
       <div class="cursor-dot" style="background:${data.color}"></div>
       <div class="cursor-label" style="background:${data.color}">${data.name}</div>
     `;
-    document.getElementById('cursors-layer').appendChild(cursorEl);
+    const layer = document.getElementById('cursors-layer');
+    if (layer) layer.appendChild(cursorEl);
     remoteCursors.set(data.userId, cursorEl);
   }
 
@@ -82,10 +88,7 @@ function updateRemoteCursor(data) {
 
 function removeRemoteCursor(userId) {
   const el = remoteCursors.get(userId);
-  if (el) {
-    el.remove();
-    remoteCursors.delete(userId);
-  }
+  if (el) { el.remove(); remoteCursors.delete(userId); }
 }
 
 function clearAllCursors() {

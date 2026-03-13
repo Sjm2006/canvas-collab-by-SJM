@@ -1,3 +1,5 @@
+// server/index.js — Express + Socket.io server
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -6,32 +8,40 @@ const { registerEvents } = require('./events');
 
 const app = express();
 const server = http.createServer(app);
+
 const io = new Server(server, {
-  cors: { origin: '*' }
+  cors: { origin: '*' },
+  transports: ['websocket', 'polling']
 });
 
+// Use Railway's dynamic port or fallback to 8080
 const PORT = process.env.PORT || 8080;
 
-// Serve static frontend files FIRST
+// ── Serve static frontend files ──
 app.use(express.static(path.join(__dirname, '../client')));
 
-// Only send index.html for /room/* routes
-app.get('/room/*', (req, res) => {
+// ── Room routes → serve index.html ──
+app.get('/room/:roomId', (req, res) => {
   res.sendFile(path.join(__dirname, '../client/index.html'));
 });
 
-// Root route
+// ── Root route ──
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../client/index.html'));
 });
 
-// Socket.io connections
+// ── Socket.io connections ──
 io.on('connection', (socket) => {
-  console.log(`Socket connected: ${socket.id}`);
+  console.log(`[+] Socket connected: ${socket.id}`);
   registerEvents(io, socket);
+
+  socket.on('disconnect', () => {
+    console.log(`[-] Socket disconnected: ${socket.id}`);
+  });
 });
 
+// ── Start server ──
 server.listen(PORT, () => {
-  console.log(`\n🎨 Whiteboard server running!`);
-  console.log(`👉 Open: http://localhost:${PORT}\n`);
+  console.log(`\n🎨 Canvas Whiteboard running!`);
+  console.log(`👉 http://localhost:${PORT}\n`);
 });

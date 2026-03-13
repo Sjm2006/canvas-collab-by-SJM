@@ -7,29 +7,49 @@ let currentTool = 'pen';
 let currentColor = '#ffffff';
 let brushSize = 4;
 let startX = 0, startY = 0;
-let snapshot = null; // for shape preview
+let snapshot = null;
 
 export function initCanvas(canvasEl) {
   canvas = canvasEl;
   ctx = canvas.getContext('2d');
+
+  // Try resize immediately, then again after DOM paints
   resizeCanvas();
+  setTimeout(resizeCanvas, 50);
+  setTimeout(resizeCanvas, 300);
+
   window.addEventListener('resize', resizeCanvas);
   return canvas;
 }
 
 export function resizeCanvas() {
-  // Save current drawing
-  const imageData = ctx ? ctx.getImageData(0, 0, canvas.width, canvas.height) : null;
-  canvas.width = canvas.offsetWidth;
-  canvas.height = canvas.offsetHeight;
+  const parent = canvas.parentElement;
+  const w = parent ? parent.clientWidth : window.innerWidth;
+  const h = parent ? parent.clientHeight : window.innerHeight;
+
+  // Don't resize if dimensions are zero
+  if (!w || !h) return;
+
+  // Save existing drawing before resize
+  let imageData = null;
+  if (ctx && canvas.width > 0 && canvas.height > 0) {
+    try { imageData = ctx.getImageData(0, 0, canvas.width, canvas.height); } catch(e) {}
+  }
+
+  canvas.width = w;
+  canvas.height = h;
   setCtxDefaults();
-  if (imageData) ctx.putImageData(imageData, 0, 0);
+
+  // Restore drawing after resize
+  if (imageData && imageData.width > 0) {
+    try { ctx.putImageData(imageData, 0, 0); } catch(e) {}
+  }
 }
 
 function setCtxDefaults() {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.fillStyle = '#1a1a2e';
+  ctx.fillStyle = '#0b0c19';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
@@ -38,8 +58,9 @@ export function setColor(color) { currentColor = color; }
 export function setBrushSize(size) { brushSize = size; }
 export function getCurrentTool() { return currentTool; }
 
-// Draw a complete stroke from data (used for replay + remote)
+// Draw a complete stroke — used for remote strokes and board replay
 export function drawStroke(stroke) {
+  if (!ctx) return;
   ctx.save();
   ctx.strokeStyle = stroke.color;
   ctx.lineWidth = stroke.size;
@@ -72,24 +93,31 @@ export function drawStroke(stroke) {
 }
 
 export function clearCanvas() {
+  if (!ctx) return;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   setCtxDefaults();
 }
 
 export function exportCanvas() {
   const link = document.createElement('a');
-  link.download = 'whiteboard.png';
-  link.href = canvas.toDataURL();
+  link.download = 'canvas-whiteboard.png';
+  link.href = canvas.toDataURL('image/png');
   link.click();
 }
 
-// --- Mouse event handlers ---
+// --- Mouse & Touch event handlers ---
 let currentPoints = [];
-let onStrokeComplete = null;
 
 export function setupMouseEvents(canvasEl, callbacks) {
-  onStrokeComplete = callbacks.onStrokeComplete;
+  const getPos = (e) => {
+    const rect = canvasEl.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left),
+      y: (e.clientY - rect.top)
+    };
+  };
 
+  // MOUSE DOWN
   canvasEl.addEventListener('mousedown', (e) => {
     isDrawing = true;
     const { x, y } = getPos(e);
@@ -102,10 +130,10 @@ export function setupMouseEvents(canvasEl, callbacks) {
     }
   });
 
+  // MOUSE MOVE
   canvasEl.addEventListener('mousemove', (e) => {
     const { x, y } = getPos(e);
     callbacks.onCursorMove(x, y);
-
     if (!isDrawing) return;
 
     if (currentTool === 'pen' || currentTool === 'eraser') {
@@ -123,7 +151,7 @@ export function setupMouseEvents(canvasEl, callbacks) {
       currentPoints.push({ x, y });
       lastX = x; lastY = y;
     } else {
-      // Shape preview
+      // Shape preview — restore snapshot then draw preview
       ctx.putImageData(snapshot, 0, 0);
       ctx.save();
       ctx.strokeStyle = currentColor;
@@ -135,12 +163,13 @@ export function setupMouseEvents(canvasEl, callbacks) {
     }
   });
 
+  // MOUSE UP / LEAVE — finalize stroke
   const stopDrawing = (e) => {
     if (!isDrawing) return;
     isDrawing = false;
     const { x, y } = getPos(e);
+    let strokeData = null;
 
-    let strokeData;
     if (currentTool === 'pen' || currentTool === 'eraser') {
       currentPoints.push({ x, y });
       strokeData = { tool: currentTool, color: currentColor, size: brushSize, points: currentPoints };
@@ -153,21 +182,28 @@ export function setupMouseEvents(canvasEl, callbacks) {
       strokeData = { tool: 'line', color: currentColor, size: brushSize, x1: startX, y1: startY, x2: x, y2: y };
     }
 
-    if (strokeData) onStrokeComplete(strokeData);
+    if (strokeData) callbacks.onStrokeComplete(strokeData);
   };
 
   canvasEl.addEventListener('mouseup', stopDrawing);
   canvasEl.addEventListener('mouseleave', stopDrawing);
 
-  // Touch support
+  // TOUCH support
+  const getTouchPos = (e) => {
+    const touch = e.touches[0] || e.changedTouches[0];
+    return { clientX: touch.clientX, clientY: touch.clientY };
+  };
+
   canvasEl.addEventListener('touchstart', (e) => {
     e.preventDefault();
     canvasEl.dispatchEvent(new MouseEvent('mousedown', getTouchPos(e)));
   }, { passive: false });
+
   canvasEl.addEventListener('touchmove', (e) => {
     e.preventDefault();
     canvasEl.dispatchEvent(new MouseEvent('mousemove', getTouchPos(e)));
   }, { passive: false });
+
   canvasEl.addEventListener('touchend', (e) => {
     e.preventDefault();
     canvasEl.dispatchEvent(new MouseEvent('mouseup', getTouchPos(e)));
@@ -188,14 +224,4 @@ function drawShapePreview(x1, y1, x2, y2) {
     ctx.lineTo(x2, y2);
     ctx.stroke();
   }
-}
-
-function getPos(e) {
-  const rect = canvas.getBoundingClientRect();
-  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-}
-
-function getTouchPos(e) {
-  const touch = e.touches[0] || e.changedTouches[0];
-  return { clientX: touch.clientX, clientY: touch.clientY };
 }
