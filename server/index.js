@@ -11,7 +11,8 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: { origin: '*' },
-  transports: ['websocket', 'polling']
+  transports: ['polling', 'websocket'], // polling FIRST
+  allowEIO3: true
 });
 
 // Use Railway's dynamic port or fallback to 8080

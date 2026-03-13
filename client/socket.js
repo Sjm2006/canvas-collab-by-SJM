@@ -5,7 +5,10 @@ const remoteCursors = new Map();
 
 export function initSocket(roomId, callbacks) {
   // Connect to the server that served this page
-  socket = io({ transports: ['websocket', 'polling'] });
+  socket = io({
+  transports: ['polling', 'websocket'], // polling FIRST
+  upgrade: true
+});
 
   socket.on('connect', () => {
     console.log('Socket connected:', socket.id);
